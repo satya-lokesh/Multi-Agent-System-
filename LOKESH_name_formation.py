@@ -4,249 +4,161 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from IPython.display import Image, display
 
+R = np.random.default_rng(7351)
 
-rng = np.random.default_rng(11004)
-
-
-# GENERATE A CONNECTED ERDOS-RENYI GRAPH
-def connected_graph(n, p, seed=41):
-    """
-    Generate an Erdos-Renyi graph repeatedly until
-    a connected graph is obtained.
-    """
-
-    current_seed = seed
-
+def get_graph(n, p, s=127):
     while True:
-        graph = nx.erdos_renyi_graph(n,p,seed=current_seed)
-        if nx.is_connected(graph):
-            return graph
-        current_seed += 1
+        G = nx.erdos_renyi_graph(n, p, seed=s)
+        if nx.is_connected(G):
+            return G
+        s += 1
 
+def segment(a, b, k):
+    t = np.linspace(0, 1, k, endpoint=False)
+    return np.asarray(a) + t[:, None] * (np.asarray(b) - np.asarray(a))
 
-# GENERATE POINTS ALONG A LINE
-def line_points(start, end, number):
-    """
-    Return equally spaced 2-D points along a line segment.
-    """
+def build(strokes):
+    return np.vstack([segment(a, b, k) for a, b, k in strokes])
 
-    t = np.linspace(0.0,1.0,number,endpoint=False)
-    start = np.asarray(start,dtype=float)
-    end = np.asarray(end,dtype=float)
-    return start + t[:, None] * (end - start)
-
-# CREATE LETTER FROM STROKES
-def make_letter(strokes, number_of_agents=20):
-    """
-    Convert line-segment strokes into exactly
-    number_of_agents target positions.
-    """
-
-    points = np.vstack(
-        [
-            line_points(start, end, count)
-            for start, end, count in strokes
-        ]
-    )
-
-    return points
-
-
-# LETTER STROKES FOR "LOKESH"
-LETTER_STROKES = {
-
-  "L": [
-        ((0, 2), (0, 0), 10),
-        ((0, 0), (1, 0), 10),
+# 20 target points for every letter
+SHAPES = {
+    "L": [
+        ((0,2),(0,0),10), ((0,0),(1,0),10)
     ],
-
-
     "O": [
-        ((0, 2), (1, 2), 5),
-        ((1, 2), (1, 0), 5),
-        ((1, 0), (0, 0), 5),
-        ((0, 0), (0, 2), 5),
+        ((0,2),(1,2),5), ((1,2),(1,0),5),
+        ((1,0),(0,0),5), ((0,0),(0,2),5)
     ],
-
-
     "K": [
-        ((0, 0), (0, 2), 8),
-        ((0, 1), (1, 2), 6),
-        ((0, 1), (1, 0), 6),
+        ((0,0),(0,2),8), ((0,1),(1,2),6),
+        ((0,1),(1,0),6)
     ],
-
     "E": [
-        ((0, 2), (1, 2), 5),
-        ((0, 2), (0, 0), 5),
-        ((0, 1), (0.8, 1), 5),
-        ((0, 0), (1, 0), 5),
+        ((0,2),(1,2),5), ((0,2),(0,0),5),
+        ((0,1),(.8,1),5), ((0,0),(1,0),5)
     ],
-
     "S": [
-        ((1, 2), (0, 2), 4),
-        ((0, 2), (0, 1), 4),
-        ((0, 1), (1, 1), 4),
-        ((1, 1), (1, 0), 4),
-        ((1, 0), (0, 0), 4),
+        ((1,2),(0,2),4), ((0,2),(0,1),4),
+        ((0,1),(1,1),4), ((1,1),(1,0),4),
+        ((1,0),(0,0),4)
     ],
-
     "H": [
-        ((0, 0), (0, 2), 7),
-        ((1, 0), (1, 2), 7),
-        ((0, 1), (1, 1), 6),
-    ],
+        ((0,0),(0,2),7), ((1,0),(1,2),7),
+        ((0,1),(1,1),6)
+    ]
 }
 
+def simulate():
+    n = 20
+    p = 0.22
+    dt = 0.055
+    gain = 0.35
+    iterations = 90
 
-# MAIN SIMULATION
-def run_simulation():
+    G = get_graph(n, p)
 
-    # PARAMETERS
-    number_of_agents = 20
+    A = nx.to_numpy_array(G)
+    L = np.diag(A.sum(1)) - A
 
-    # Probability of an edge between two agents
-    edge_probability = 0.22
+    goals = {c: build(v) for c, v in SHAPES.items()}
 
-    # Simulation time step
-    time_step = 0.055
+    X = R.uniform(-1.5, 1.5, (n, 2))
+    history = []
 
-    # Attraction / anchoring gain
-    anchoring_gain = 0.35
+    for c in "LOKESH":
+        target = goals[c]
+        target -= target.mean(axis=0)
 
-    # Number of iterations spent forming each letter
-    steps_per_letter = 90
+        for _ in range(iterations):
+            U = -L @ (X - target) + gain * (target - X)
+            X += dt * U
+            history.append((c, X.copy()))
 
-
-    # CREATE CONNECTED GRAPH
-    graph = connected_graph(
-        number_of_agents,
-        edge_probability,
-        seed=41
-    )
-
-
-    # ADJACENCY MATRIX
-    adjacency = nx.to_numpy_array(
-        graph,
-        nodelist=range(number_of_agents)
-    )
-
-    # DEGREE MATRIX
-    degree_matrix = np.diag(
-        adjacency.sum(axis=1)
-    )
-
-
-    # GRAPH LAPLACIAN L = D - A
-    laplacian = degree_matrix - adjacency
-
-  # CREATE TARGET POSITIONS FOR EACH LETTER
-    targets = {}
-
-    for letter, strokes in LETTER_STROKES.items():
-
-        targets[letter] = make_letter(strokes,number_of_agents)
-
-
-    # RANDOM INITIAL POSITIONS
-    positions = rng.uniform(
-        -1.5,
-        1.5,
-        size=(number_of_agents, 2)
-    )
-
-    # STORE FRAMES FOR ANIMATION
-    frames = []
-  
-    # FORM "LOKESH" LETTER BY LETTER
-    for letter in "LOKESH":
-
-        # Desired positions for current letter
-        desired = targets[letter].copy()
-
-        # CENTER LETTER AROUND ORIGIN
-        desired = desired - desired.mean(axis=0)
-
-        # FORMATION CONTROL
-        for _ in range(steps_per_letter):
-
-            # Consensus / formation control  u = -L(x-r)
-            control = -laplacian @ (positions - desired)
-
-            # Attraction toward desired positions gamma(r-x)
-            control += anchoring_gain*(desired - positions)
-
-            # Update positions
-            positions = (positions + time_step * control)
-
-            # Save current positions
-            frames.append((letter,positions.copy()))
-
-    # DISPLAY COMMUNICATION GRAPH
+    # Communication graph
     plt.figure(figsize=(7, 5))
+    pos = nx.spring_layout(G, seed=92)
 
-    graph_layout = nx.spring_layout(graph,seed=4)
-    
-    nx.draw(graph,graph_layout,with_labels=True,node_color="skyblue",edge_color="gray",node_size=450)
-    plt.title("Connected Erdos-Renyi Graph: N=20, p=0.22")
+    nx.draw(
+        G, pos,
+        with_labels=True,
+        node_color="black",
+        edge_color="grey",
+        node_size=450,
+        font_color="white"
+    )
 
-
-    # Do NOT use tight_layout()
-    # It can produce warnings with NetworkX axes.
-
-
-    plt.savefig("lokesh_communication_graph.png",dpi=200, bbox_inches="tight")
-
-
+    plt.title("Connected Communication Graph")
+    plt.savefig(
+        "lokesh_graph.png",
+        dpi=200,
+        bbox_inches="tight"
+    )
     plt.show()
 
+    # Animation
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    # CREATE ANIMATION FIGURE
-    figure, axis = plt.subplots(figsize=(6, 6))
+    dots = ax.scatter(
+        [], [], s=65,
+        color="black",
+        zorder=2
+    )
 
-    # AGENTS
-    scatter = axis.scatter([],[],s=65,color="royalblue",zorder=2)
+    links = [
+        ax.plot(
+            [], [],
+            color="lightblue",
+            linewidth=0.7,
+            zorder=1
+        )[0]
+        for _ in G.edges()
+    ]
 
-    # COMMUNICATION GRAPH EDGES
-    edge_lines = []
-    for _ in graph.edges():
-        line = axis.plot([],[],color="lightgray",linewidth=0.7, zorder=1)[0]
-        edge_lines.append(line)
+    heading = ax.set_title("")
+
+    ax.set_xlim(-1.8, 1.8)
+    ax.set_ylim(-1.5, 1.7)
+    ax.set_aspect("equal")
+    ax.grid(alpha=0.2)
+    ax.set_xlabel("x position")
+    ax.set_ylabel("y position")
+
+    def animate(i):
+        char, pts = history[i]
+
+        dots.set_offsets(pts)
+        heading.set_text(f"Formation Control: {char}")
+
+        for line, (u, v) in zip(links, G.edges()):
+            line.set_data(
+                pts[[u, v], 0],
+                pts[[u, v], 1]
+            )
+
+        return [dots, heading, *links]
+
+    ani = FuncAnimation(
+        fig,
+        animate,
+        frames=range(0, len(history), 3),
+        interval=50,
+        blit=False
+    )
+
+    filename = "lokesh_animation.gif"
+
+    ani.save(
+        filename,
+        writer=PillowWriter(fps=20)
+    )
+
+    plt.close(fig)
+
+    print("GIF saved at:")
+    import os
+    print(os.path.abspath(filename))
+
+    display(Image(filename=filename))
 
 
-    # GRAPH SETTINGS
-    title = axis.set_title("")
-    axis.set_xlim(-1.8,1.8)
-    axis.set_ylim(-1.5,1.7)
-    axis.set_aspect("equal")
-    axis.grid(alpha=0.2)
-    axis.set_xlabel("x position")
-    axis.set_ylabel("y position")
-
-  # UPDATE FUNCTION FOR ANIMATION
-    def update(frame_index):
-        # Get letter and current agent positions
-        letter, current_positions = frames[frame_index]
-        # Update agent positions
-        scatter.set_offsets(current_positions)
-        # Update title
-        title.set_text(f"Formation Control: {letter}")
-        # Update communication edges
-        for line, (i, j) in zip(edge_lines,graph.edges()):
-            line.set_data(current_positions[[i, j], 0],current_positions[[i, j], 1])
-        return [scatter,title,*edge_lines]
-
-    # CREATE ANIMATION
-    animation = FuncAnimation(figure,update,frames=range(0,len(frames),3),interval=50,blit=False)
-    # SAVE AS GIF
-    gif_name = "lokesh_formation.gif"
-    animation.save(gif_name,writer=PillowWriter(fps=20))
-
-    # Close matplotlib figure
-    plt.close(figure)
-    # DISPLAY GIF IN JUPYTER NOTEBOOK
-
-    display(Image(filename=gif_name))
-
-# RUN THE COMPLETE SIMULATION
-run_simulation()
+simulate()
