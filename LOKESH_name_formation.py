@@ -3,162 +3,315 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
 from IPython.display import Image, display
+import os
 
-R = np.random.default_rng(7351)
 
-def get_graph(n, p, s=127):
-    while True:
-        G = nx.erdos_renyi_graph(n, p, seed=s)
-        if nx.is_connected(G):
-            return G
-        s += 1
+class Formation:
 
-def segment(a, b, k):
-    t = np.linspace(0, 1, k, endpoint=False)
-    return np.asarray(a) + t[:, None] * (np.asarray(b) - np.asarray(a))
+    def __init__(self):
+        self.agents = 20
+        self.prob = 0.22
+        self.dt = 0.055
+        self.k = 0.35
+        self.cycles = 90
+        self.random = np.random.default_rng(8246)
 
-def build(strokes):
-    return np.vstack([segment(a, b, k) for a, b, k in strokes])
+        self.shapes = self.define_shapes()
+        self.graph = self.create_network()
+        self.laplacian = self.get_laplacian()
 
-# 20 target points for every letter
-SHAPES = {
-    "L": [
-        ((0,2),(0,0),10), ((0,0),(1,0),10)
-    ],
-    "O": [
-        ((0,2),(1,2),5), ((1,2),(1,0),5),
-        ((1,0),(0,0),5), ((0,0),(0,2),5)
-    ],
-    "K": [
-        ((0,0),(0,2),8), ((0,1),(1,2),6),
-        ((0,1),(1,0),6)
-    ],
-    "E": [
-        ((0,2),(1,2),5), ((0,2),(0,0),5),
-        ((0,1),(.8,1),5), ((0,0),(1,0),5)
-    ],
-    "S": [
-        ((1,2),(0,2),4), ((0,2),(0,1),4),
-        ((0,1),(1,1),4), ((1,1),(1,0),4),
-        ((1,0),(0,0),4)
-    ],
-    "H": [
-        ((0,0),(0,2),7), ((1,0),(1,2),7),
-        ((0,1),(1,1),6)
-    ]
-}
+    # Define all letters
+    def define_shapes(self):
 
-def simulate():
-    n = 20
-    p = 0.22
-    dt = 0.055
-    gain = 0.35
-    iterations = 90
+        return {
 
-    G = get_graph(n, p)
+            "L": [
+                ((0, 2), (0, 0), 10),
+                ((0, 0), (1, 0), 10)
+            ],
 
-    A = nx.to_numpy_array(G)
-    L = np.diag(A.sum(1)) - A
+            "O": [
+                ((0, 2), (1, 2), 5),
+                ((1, 2), (1, 0), 5),
+                ((1, 0), (0, 0), 5),
+                ((0, 0), (0, 2), 5)
+            ],
 
-    goals = {c: build(v) for c, v in SHAPES.items()}
+            "K": [
+                ((0, 0), (0, 2), 8),
+                ((0, 1), (1, 2), 6),
+                ((0, 1), (1, 0), 6)
+            ],
 
-    X = R.uniform(-1.5, 1.5, (n, 2))
-    history = []
+            "E": [
+                ((0, 2), (1, 2), 5),
+                ((0, 2), (0, 0), 5),
+                ((0, 1), (0.8, 1), 5),
+                ((0, 0), (1, 0), 5)
+            ],
 
-    for c in "LOKESH":
-        target = goals[c]
-        target -= target.mean(axis=0)
+            "S": [
+                ((1, 2), (0, 2), 4),
+                ((0, 2), (0, 1), 4),
+                ((0, 1), (1, 1), 4),
+                ((1, 1), (1, 0), 4),
+                ((1, 0), (0, 0), 4)
+            ],
 
-        for _ in range(iterations):
-            U = -L @ (X - target) + gain * (target - X)
-            X += dt * U
-            history.append((c, X.copy()))
+            "H": [
+                ((0, 0), (0, 2), 7),
+                ((1, 0), (1, 2), 7),
+                ((0, 1), (1, 1), 6)
+            ]
+        }
 
-    # Communication graph
-    plt.figure(figsize=(7, 5))
-    pos = nx.spring_layout(G, seed=92)
+    # Generate connected network
+    def create_network(self):
 
-    nx.draw(
-        G, pos,
-        with_labels=True,
-        node_color="black",
-        edge_color="grey",
-        node_size=450,
-        font_color="white"
-    )
+        seed = 153
 
-    plt.title("Connected Communication Graph")
-    plt.savefig(
-        "lokesh_graph.png",
-        dpi=200,
-        bbox_inches="tight"
-    )
-    plt.show()
+        while True:
 
-    # Animation
-    fig, ax = plt.subplots(figsize=(6, 6))
-
-    dots = ax.scatter(
-        [], [], s=65,
-        color="black",
-        zorder=2
-    )
-
-    links = [
-        ax.plot(
-            [], [],
-            color="lightblue",
-            linewidth=0.7,
-            zorder=1
-        )[0]
-        for _ in G.edges()
-    ]
-
-    heading = ax.set_title("")
-
-    ax.set_xlim(-1.8, 1.8)
-    ax.set_ylim(-1.5, 1.7)
-    ax.set_aspect("equal")
-    ax.grid(alpha=0.2)
-    ax.set_xlabel("x position")
-    ax.set_ylabel("y position")
-
-    def animate(i):
-        char, pts = history[i]
-
-        dots.set_offsets(pts)
-        heading.set_text(f"Formation Control: {char}")
-
-        for line, (u, v) in zip(links, G.edges()):
-            line.set_data(
-                pts[[u, v], 0],
-                pts[[u, v], 1]
+            network = nx.erdos_renyi_graph(
+                self.agents,
+                self.prob,
+                seed=seed
             )
 
-        return [dots, heading, *links]
+            if nx.is_connected(network):
+                return network
 
-    ani = FuncAnimation(
-        fig,
-        animate,
-        frames=range(0, len(history), 3),
-        interval=50,
-        blit=False
-    )
+            seed += 1
 
-    filename = "lokesh_animation.gif"
+    # Calculate Laplacian matrix
+    def get_laplacian(self):
 
-    ani.save(
-        filename,
-        writer=PillowWriter(fps=20)
-    )
+        matrix = nx.to_numpy_array(self.graph)
 
-    plt.close(fig)
+        degree = np.diag(
+            np.sum(matrix, axis=1)
+        )
 
-    print("GIF saved at:")
-    import os
-    print(os.path.abspath(filename))
+        return degree - matrix
 
-    display(Image(filename=filename))
+    # Generate points between two coordinates
+
+    @staticmethod
+    def make_segment(start, finish, amount):
+
+        values = np.linspace(
+            0,
+            1,
+            amount,
+            endpoint=False
+        )
+
+        start = np.array(start, dtype=float)
+        finish = np.array(finish, dtype=float)
+
+        return start + values[:, None] * (
+            finish - start
+        )
+
+    # Convert strokes into target coordinates
+    def target_coordinates(self, strokes):
+
+        pieces = []
+
+        for start, finish, amount in strokes:
+
+            part = self.make_segment(
+                start,
+                finish,
+                amount
+            )
+
+            pieces.append(part)
+
+        return np.vstack(pieces)
+
+    # Prepare all letter targets
+    def prepare_targets(self):
+
+        targets = {}
+
+        for character in self.shapes:
+
+            points = self.target_coordinates(
+                self.shapes[character]
+            )
+
+            points -= points.mean(axis=0)
+
+            targets[character] = points
+
+        return targets
+
+    # Run formation control
+    def run(self):
+
+        targets = self.prepare_targets()
+
+        current = self.random.uniform(
+            -1.5,
+            1.5,
+            size=(self.agents, 2)
+        )
+
+        record = []
+
+        for character in "LOKESH":
+
+            destination = targets[character]
+
+            for step in range(self.cycles):
+
+                difference = current - destination
+
+                velocity = (
+                    -self.laplacian @ difference
+                    + self.k * (destination - current)
+                )
+
+                current = current + self.dt * velocity
+
+                record.append(
+                    (character, current.copy())
+                )
+
+        return record
+
+    # Plot communication network
+    def show_network(self):
+
+        plt.figure(figsize=(7, 5))
+
+        layout = nx.spring_layout(
+            self.graph,
+            seed=318
+        )
+
+        nx.draw(
+            self.graph,
+            layout,
+            with_labels=True,
+            node_color="black",
+            edge_color="skyblue",
+            node_size=450,
+            font_color="white"
+        )
+
+        plt.title(
+            "Connected Erdos-Renyi Network"
+        )
+
+        plt.savefig(
+            "lokesh_graph.png",
+            dpi=200,
+            bbox_inches="tight"
+        )
+
+        plt.show()
+
+    # Create animation
+    def animate(self, data):
+
+        fig, ax = plt.subplots(
+            figsize=(6, 6)
+        )
+
+        points = ax.scatter(
+            [],
+            [],
+            s=65,
+            color="black"
+        )
+
+        connections = []
+
+        for _ in self.graph.edges():
+
+            connections.append(
+                ax.plot(
+                    [],
+                    [],
+                    color="skyblue",
+                    linewidth=0.7
+                )[0]
+            )
+
+        heading = ax.set_title("")
+
+        ax.set_xlim(-1.8, 1.8)
+        ax.set_ylim(-1.5, 1.7)
+        ax.set_aspect("equal")
+
+        ax.grid(alpha=0.2)
+
+        ax.set_xlabel("x position")
+        ax.set_ylabel("y position")
+
+        def redraw(frame):
+
+            character, location = data[frame]
+
+            points.set_offsets(location)
+
+            heading.set_text(
+                "Formation Control : " + character
+            )
+
+            for line, (a, b) in zip(
+                connections,
+                self.graph.edges()
+            ):
+
+                line.set_data(
+                    location[[a, b], 0],
+                    location[[a, b], 1]
+                )
+
+            return [
+                points,
+                heading,
+                *connections
+            ]
+
+        movie = FuncAnimation(
+            fig,
+            redraw,
+            frames=range(
+                0,
+                len(data),
+                3
+            ),
+            interval=50,
+            blit=False
+        )
+
+        filename = "lokesh_animation.gif"
+
+        movie.save(
+            filename,
+            writer=PillowWriter(fps=20)
+        )
+
+        plt.close(fig)
+
+        print("Animation saved to:")
+        print(os.path.abspath(filename))
+
+        display(
+            Image(filename=filename)
+        )
 
 
-simulate()
+# EXECUTION
+
+model = Formation()
+
+trajectory = model.run()
+
+model.show_network()
+
+model.animate(trajectory)
